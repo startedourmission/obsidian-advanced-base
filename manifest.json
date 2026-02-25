@@ -1,0 +1,9 @@
+{
+  "id": "base-kanban",
+  "name": "Base Kanban",
+  "version": "0.1.0",
+  "minAppVersion": "1.10.0",
+  "description": "Kanban board view for Obsidian Bases",
+  "author": "",
+  "isDesktopOnly": false
+}
