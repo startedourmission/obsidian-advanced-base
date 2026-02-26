@@ -1,9 +1,10 @@
 {
   "id": "base-kanban",
   "name": "Base Kanban",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "minAppVersion": "1.10.0",
-  "description": "Kanban board view for Obsidian Bases",
-  "author": "",
+  "description": "Add a Kanban board view to Obsidian Bases for visual task management.",
+  "author": "startedourmission",
+  "authorUrl": "https://github.com/startedourmission",
   "isDesktopOnly": false
 }
