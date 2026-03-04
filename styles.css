@@ -325,6 +325,10 @@
 	background: var(--background-modifier-hover);
 }
 
+.base-gantt-toggle-all-btn {
+	margin-left: auto;
+}
+
 .base-gantt-wrapper {
 	width: 100%;
 	flex: 1;

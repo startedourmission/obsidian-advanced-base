@@ -278,6 +278,25 @@ export class GanttView extends BasesView {
 				this.onDataUpdated();
 			});
 		}
+
+		// Expand/Collapse all sub-tasks button
+		const toggleAllBtn = toolbar.createEl("button", {
+			cls: "base-gantt-scale-btn clickable-icon base-gantt-toggle-all-btn",
+			text: this.expandedTasks.size > 0 ? "Collapse All" : "Expand All",
+		});
+		toggleAllBtn.addEventListener("click", async () => {
+			if (this.expandedTasks.size > 0) {
+				// Collapse all
+				this.expandedTasks.clear();
+				this.onDataUpdated();
+			} else {
+				// Expand all
+				for (const task of this.tasks) {
+					this.expandedTasks.add(task.entry.file.path);
+				}
+				this.onDataUpdated();
+			}
+		});
 	}
 
 	private renderChart(
@@ -307,6 +326,27 @@ export class GanttView extends BasesView {
 		for (let i = 0; i < this.tasks.length; i++) {
 			this.renderRow(rowsEl, this.tasks[i], i, rangeStart, totalDays, startProp, endProp, canDrag);
 		}
+
+		// Re-expand previously expanded tasks
+		if (this.expandedTasks.size > 0) {
+			for (const task of this.tasks) {
+				const filePath = task.entry.file.path;
+				if (!this.expandedTasks.has(filePath)) continue;
+				const row = rowsEl.children[Array.from(rowsEl.querySelectorAll(".base-gantt-row")).findIndex(
+					(r) => r.querySelector(".base-gantt-task-link")?.textContent === task.entry.file.basename
+				)] as HTMLElement;
+				if (!row) continue;
+				task.el?.addClass("base-gantt-bar-expanded");
+				this.parseSubTasks(task.entry.file).then((subTasks) => {
+					this.subTaskCache.set(filePath, subTasks);
+					this.renderSubRows(row, task, subTasks, rangeStart, totalDays);
+					this.recalcChartHeight();
+				});
+			}
+		}
+
+		// Scroll to today
+		this.scrollToToday(wrapper, rangeStart, totalDays);
 	}
 
 	private computeRange(): { rangeStart: Date; rangeEnd: Date; totalDays: number } {
@@ -491,6 +531,19 @@ export class GanttView extends BasesView {
 		const line = chart.createDiv({ cls: "base-gantt-today-line" });
 		line.style.left = `${LABEL_WIDTH + this.daysToPx(dayOffset)}px`;
 		line.style.top = `${HEADER_HEIGHT}px`;
+	}
+
+	private scrollToToday(wrapper: HTMLElement, rangeStart: Date, totalDays: number): void {
+		const today = new Date();
+		today.setHours(0, 0, 0, 0);
+		const dayOffset = this.dateToDayOffset(today, rangeStart);
+		if (dayOffset < 0 || dayOffset > totalDays) return;
+
+		const todayPx = LABEL_WIDTH + this.daysToPx(dayOffset);
+		// Center today in the visible area
+		requestAnimationFrame(() => {
+			wrapper.scrollLeft = Math.max(0, todayPx - wrapper.clientWidth / 2);
+		});
 	}
 
 	// ─── Rows ───
