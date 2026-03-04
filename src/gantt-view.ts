@@ -15,6 +15,13 @@ interface TaskBar {
 	el: HTMLElement;
 }
 
+interface SubTask {
+	text: string;
+	completed: boolean;
+	startDate: Date;
+	endDate: Date;
+}
+
 // ─── Scale config ───
 
 type TimeScale = "day" | "week" | "month";
@@ -44,6 +51,8 @@ export class GanttView extends BasesView {
 	private plugin: BaseKanbanPlugin;
 	private rootEl: HTMLElement;
 	private tasks: TaskBar[] = [];
+	private expandedTasks: Set<string> = new Set();
+	private subTaskCache: Map<string, SubTask[]> = new Map();
 
 	// Drag state
 	private dragState: {
@@ -104,6 +113,7 @@ export class GanttView extends BasesView {
 	onDataUpdated(): void {
 		this.rootEl.empty();
 		this.tasks = [];
+		this.subTaskCache.clear();
 
 		const startProp = this.config.getAsPropertyId("startDateProperty");
 		const endProp = this.config.getAsPropertyId("endDateProperty");
@@ -186,6 +196,70 @@ export class GanttView extends BasesView {
 			return isNaN(d.getTime()) ? null : d;
 		}
 		return null;
+	}
+
+	private async parseSubTasks(file: import("obsidian").TFile): Promise<SubTask[]> {
+		const content = await this.app.vault.read(file);
+		const lines = content.split("\n");
+		const subTasks: SubTask[] = [];
+
+		for (const line of lines) {
+			const taskMatch = line.match(/^\s*-\s*\[([ xX])\]\s*(.+)/);
+			if (!taskMatch) continue;
+
+			const completed = taskMatch[1] !== " ";
+			const taskText = taskMatch[2];
+
+			// Parse emoji dates
+			let startDate: Date | null = null;
+			let dueDate: Date | null = null;
+
+			const startMatch = taskText.match(/🛫\s*(\d{4}-\d{2}-\d{2})/);
+			if (startMatch) startDate = new Date(startMatch[1]);
+
+			const dueMatch = taskText.match(/📅\s*(\d{4}-\d{2}-\d{2})/);
+			if (dueMatch) dueDate = new Date(dueMatch[1]);
+
+			const scheduledMatch = taskText.match(/⏳\s*(\d{4}-\d{2}-\d{2})/);
+			if (!startDate && scheduledMatch) startDate = new Date(scheduledMatch[1]);
+
+			// Need at least one date to show on gantt
+			if (!startDate && !dueDate) continue;
+
+			// Clean task text (remove emoji dates)
+			let cleanText = taskText
+				.replace(/[🛫📅⏳✅]\s*\d{4}-\d{2}-\d{2}/g, "")
+				.trim();
+
+			const SUB_DAY_MS = 86400000;
+			let finalStart: Date;
+			let finalEnd: Date;
+
+			if (startDate && dueDate) {
+				finalStart = startDate;
+				finalEnd = dueDate;
+			} else if (dueDate) {
+				finalStart = dueDate;
+				finalEnd = new Date(dueDate.getTime() + SUB_DAY_MS);
+			} else {
+				finalStart = startDate!;
+				finalEnd = new Date(startDate!.getTime() + SUB_DAY_MS);
+			}
+
+			if (finalEnd.getTime() <= finalStart.getTime()) {
+				finalEnd = new Date(finalStart.getTime() + SUB_DAY_MS);
+			}
+
+			subTasks.push({
+				text: cleanText,
+				completed,
+				startDate: finalStart,
+				endDate: finalEnd,
+			});
+		}
+
+		subTasks.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+		return subTasks;
 	}
 
 	// ─── Render chart ───
@@ -493,6 +567,40 @@ export class GanttView extends BasesView {
 			menu.showAtMouseEvent(e);
 		});
 
+		// Click to toggle sub-tasks (distinguish from drag)
+		let pointerDownPos: { x: number; y: number } | null = null;
+		bar.addEventListener("pointerdown", (e: PointerEvent) => {
+			pointerDownPos = { x: e.clientX, y: e.clientY };
+		});
+		bar.addEventListener("click", async (e: MouseEvent) => {
+			if (pointerDownPos) {
+				const dx = Math.abs(e.clientX - pointerDownPos.x);
+				const dy = Math.abs(e.clientY - pointerDownPos.y);
+				if (dx > 3 || dy > 3) return; // Was a drag, not a click
+			}
+
+			const filePath = task.entry.file.path;
+			const isExpanded = this.expandedTasks.has(filePath);
+
+			if (isExpanded) {
+				this.expandedTasks.delete(filePath);
+				// Remove sub-rows
+				const subRows = row.parentElement?.querySelectorAll(
+					`.base-gantt-sub-row[data-parent="${CSS.escape(filePath)}"]`
+				);
+				subRows?.forEach((el) => el.remove());
+				bar.removeClass("base-gantt-bar-expanded");
+				this.recalcChartHeight();
+			} else {
+				this.expandedTasks.add(filePath);
+				bar.addClass("base-gantt-bar-expanded");
+				const subTasks = await this.parseSubTasks(task.entry.file);
+				this.subTaskCache.set(filePath, subTasks);
+				this.renderSubRows(row, task, subTasks, rangeStart, totalDays);
+				this.recalcChartHeight();
+			}
+		});
+
 		if (!canDrag) return;
 
 		// Drag: move
@@ -519,6 +627,76 @@ export class GanttView extends BasesView {
 			e.stopPropagation();
 			this.startDrag(e, task, "resize-end", bar, rangeStart, startProp, endProp);
 		});
+	}
+
+	private renderSubRows(
+		parentRow: HTMLElement,
+		parentTask: TaskBar,
+		subTasks: SubTask[],
+		rangeStart: Date,
+		totalDays: number,
+	): void {
+		const sc = this.getScaleConfig();
+		const filePath = parentTask.entry.file.path;
+		let insertAfter: HTMLElement = parentRow;
+
+		for (let i = 0; i < subTasks.length; i++) {
+			const sub = subTasks[i];
+			const subRow = createDiv({ cls: "base-gantt-sub-row" });
+			subRow.dataset.parent = filePath;
+			subRow.style.height = `${ROW_HEIGHT}px`;
+
+			// Sub-task label (indented)
+			const label = subRow.createDiv({ cls: "base-gantt-sub-row-label" });
+			label.style.width = `${LABEL_WIDTH}px`;
+
+			label.createEl("span", {
+				cls: `base-gantt-sub-checkbox ${sub.completed ? "is-checked" : ""}`,
+				text: sub.completed ? "\u2713" : "",
+			});
+			label.createEl("span", {
+				cls: "base-gantt-sub-task-text",
+				text: sub.text,
+			});
+
+			// Grid
+			const gridEl = subRow.createDiv({ cls: "base-gantt-row-grid" });
+			gridEl.style.left = `${LABEL_WIDTH}px`;
+			gridEl.style.width = `${totalDays * sc.pxPerDay}px`;
+
+			// Sub bar
+			const startOffset = this.dateToDayOffset(sub.startDate, rangeStart);
+			const duration = this.dateToDayOffset(sub.endDate, rangeStart) - startOffset;
+			const barLeft = this.daysToPx(startOffset);
+			const barWidth = Math.max(this.daysToPx(duration), MIN_BAR_PX);
+
+			const subBar = gridEl.createDiv({
+				cls: `base-gantt-sub-bar ${sub.completed ? "is-completed" : ""}`,
+			});
+			subBar.style.left = `${barLeft}px`;
+			subBar.style.width = `${barWidth}px`;
+
+			if (barWidth > 40) {
+				subBar.createEl("span", {
+					cls: "base-gantt-bar-label",
+					text: sub.text,
+				});
+			}
+
+			// Insert after parent row (or after last sub-row)
+			insertAfter.insertAdjacentElement("afterend", subRow);
+			insertAfter = subRow;
+		}
+	}
+
+	private recalcChartHeight(): void {
+		const rows = this.rootEl.querySelector(".base-gantt-rows");
+		if (!rows) return;
+		const totalRows = rows.childElementCount;
+		const chart = this.rootEl.querySelector(".base-gantt-chart") as HTMLElement;
+		if (chart) {
+			chart.style.height = `${HEADER_HEIGHT + totalRows * ROW_HEIGHT}px`;
+		}
 	}
 
 	private renderWeekendBg(gridEl: HTMLElement, rangeStart: Date, totalDays: number, sc: ScaleConfig): void {
