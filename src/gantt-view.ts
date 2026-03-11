@@ -183,7 +183,8 @@ export class GanttView extends BasesView {
 			const d = new Date(val);
 			return isNaN(d.getTime()) ? null : d;
 		}
-		const s = String(val).trim();
+		if (typeof val !== "string") return null;
+		const s = val.trim();
 		if (s.length === 0) return null;
 		// Only parse strings that look like dates (YYYY-MM-DD or ISO format)
 		if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
