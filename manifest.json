@@ -3,7 +3,7 @@
   "name": "Advanced Base",
   "version": "1.3.1",
   "minAppVersion": "1.10.0",
-  "description": "Add Kanban board and Gantt chart views to Obsidian Bases.",
+  "description": "Add Kanban board and Gantt chart views to Bases.",
   "author": "startedourmission",
   "authorUrl": "https://github.com/startedourmission",
   "isDesktopOnly": false

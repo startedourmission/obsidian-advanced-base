@@ -44,7 +44,7 @@ Requires Obsidian **1.10.0+** (Bases API).
 
 ### Manual
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/startedourmission/obsidian-base-kanban/releases)
+1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/startedourmission/obsidian-advanced-base/releases)
 2. Create a folder `advanced-base` in your vault's `.obsidian/plugins/` directory
 3. Copy the downloaded files into it
 4. Enable the plugin in Settings > Community Plugins
